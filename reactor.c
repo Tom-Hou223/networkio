@@ -6,19 +6,24 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <sys/time.h>
+#include <time.h>
+
 
 #define BUFFER_LENGTH 1024
-#define CONNECTION_SIZE 1024
+#define CONNECTION_SIZE 1048576
+#define MAX_PORT 20
+#define TIME_SUB_MS(tv1, tv2)  ((tv1.tv_sec - tv2.tv_sec) * 1000 + (tv1.tv_usec - tv2.tv_usec) / 1000)
 
 typedef int(*RCALLBACK)(int fd);
 int accept_cb(int fd);
 int recv_cb(int fd);
 int send_cb(int fd);
-int set_event(int fd, int event,int flag);
+int set_event(int fd, int event, int flag);
 int init_server(unsigned short port);
 int event_register(int fd, int event);
 
-
+struct timeval begin;
 int epfd = 0;
 
 struct conn {
@@ -48,9 +53,25 @@ int accept_cb(int fd)
     socklen_t clientlen = sizeof(clientaddr);
 
     int clientfd = accept(fd, (struct sockaddr*)&clientaddr, &clientlen);
-    printf("accept fd:%d\n", clientfd);
+    //printf("accept finished:%d\n", clientfd);
+
+    if(clientfd < 0)
+    {
+        printf("accept failed: %d --> %s\n", errno, strerror(errno));
+        return -1;
+    }
 
     event_register(clientfd, EPOLLIN);
+
+    if((clientfd % 1000) == 0)
+    {
+        struct timeval current;
+        gettimeofday(&current, NULL);
+
+        int time_used = TIME_SUB_MS(current, begin);
+        memcpy(&begin, &current, sizeof(struct timeval));
+        printf("accept count:%d, time:%d\n", clientfd, time_used);
+    }
 
     return clientfd;
 }
@@ -67,14 +88,14 @@ int recv_cb(int fd)
         return 0;
     }
     conn_list[fd].rlength = count;
-    printf("recv data:%s\n", conn_list[fd].rbuffer);
+    //printf("recv data:%s\n", conn_list[fd].rbuffer);
 
 #if 1 //echo
     conn_list[fd].wlength = conn_list[fd].rlength;
     memcpy(conn_list[fd].wbuffer, conn_list[fd].rbuffer, conn_list[fd].wlength);
 #endif
 
-    
+
     set_event(fd, EPOLLOUT, 0);
 
     return count;
@@ -84,13 +105,13 @@ int send_cb(int fd)
 {
     int count = send(fd, conn_list[fd].wbuffer, conn_list[fd].wlength, 0);
 
-    set_event(fd, EPOLLIN,0);
+    set_event(fd, EPOLLIN, 0);
 
     return count;
 }
 
 
-int set_event(int fd, int event,int flag)
+int set_event(int fd, int event, int flag)
 {
     if(flag)//non-zero add
     {
@@ -111,6 +132,10 @@ int set_event(int fd, int event,int flag)
 
 int event_register(int fd, int event)
 {
+    if(fd < 0)
+    {
+        return -1;
+    }
     conn_list[fd].fd = fd;
     conn_list[fd].r_action.recv_callback = recv_cb;
     conn_list[fd].send_callback = send_cb;
@@ -121,7 +146,7 @@ int event_register(int fd, int event)
     memset(conn_list[fd].wbuffer, 0, BUFFER_LENGTH);
     conn_list[fd].wlength = 0;
 
-    set_event(fd, event,1);
+    set_event(fd, event, 1);
 
 }
 
@@ -143,7 +168,7 @@ int init_server(unsigned short port)
     }
 
     listen(sockfd, 10);
-    printf("listening finished:%d\n", sockfd);
+    //printf("listening finished:%d\n", sockfd);
 
     return sockfd;
 }
@@ -152,14 +177,23 @@ int init_server(unsigned short port)
 int main()
 {
     unsigned short port = 2000;
-    int sockfd = init_server(port);
+
 
     epfd = epoll_create(1);
 
-    conn_list[sockfd].fd = sockfd;
-    conn_list[sockfd].r_action.accept_callback = accept_cb;
 
-    set_event(sockfd, EPOLLIN,1);
+
+    int i;
+    for(i = 0; i < MAX_PORT; i++)
+    {
+        int sockfd = init_server(port + i);
+        conn_list[sockfd].fd = sockfd;
+        conn_list[sockfd].r_action.accept_callback = accept_cb;
+        set_event(sockfd, EPOLLIN, 1);
+    }
+
+
+    gettimeofday(&begin, NULL);
 
     while(1)
     {
@@ -176,7 +210,7 @@ int main()
             {
                 conn_list[connfd].send_callback(connfd);
             }
-            
+
         }
     }
     return 0;
