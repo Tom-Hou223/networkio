@@ -10,7 +10,7 @@
 #include <time.h>
 
 
-#define BUFFER_LENGTH 1024
+#define BUFFER_LENGTH 20
 #define CONNECTION_SIZE 1048576
 #define MAX_PORT 20
 #define TIME_SUB_MS(tv1, tv2)  ((tv1.tv_sec - tv2.tv_sec) * 1000 + (tv1.tv_usec - tv2.tv_usec) / 1000)
@@ -61,7 +61,7 @@ int accept_cb(int fd)
         return -1;
     }
 
-    event_register(clientfd, EPOLLIN);
+    event_register(clientfd, EPOLLIN );
 
     if((clientfd % 1000) == 0)
     {
@@ -78,6 +78,7 @@ int accept_cb(int fd)
 
 int recv_cb(int fd)
 {
+    memset(conn_list[fd].rbuffer, 0, BUFFER_LENGTH);
     int count = recv(fd, conn_list[fd].rbuffer, BUFFER_LENGTH, 0);
     if(count == 0)
     {
@@ -93,10 +94,12 @@ int recv_cb(int fd)
 #if 1 //echo
     conn_list[fd].wlength = conn_list[fd].rlength;
     memcpy(conn_list[fd].wbuffer, conn_list[fd].rbuffer, conn_list[fd].wlength);
+    printf("[%d]RECV: %s\n",conn_list[fd].rlength ,conn_list[fd].rbuffer);
 #endif
 
 
-    set_event(fd, EPOLLOUT, 0);
+    //set_event(fd, EPOLLOUT, 0);
+    
 
     return count;
 }
